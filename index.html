@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <title>Casino Royale 2026 - High Roller Edition</title>
+    <style>
+        :root { --gold: #f1c40f; --dark: #0a0a0a; --glass: rgba(255, 255, 255, 0.1); }
+        body { margin: 0; background: var(--dark); overflow: hidden; font-family: 'Segoe UI', sans-serif; }
+        
+        /* GIAO DIỆN CHUẨN CASINO */
+        #ui-wrapper { position: absolute; width: 100%; height: 100%; pointer-events: none; z-index: 10; }
+        .panel { background: rgba(0,0,0,0.8); border: 2px solid var(--gold); border-radius: 50px; pointer-events: auto; box-shadow: 0 0 30px rgba(0,0,0,0.5); }
+        
+        .header-info { position: absolute; top: 20px; left: 50%; transform: translateX(-50%); width: 800px; height: 60px; display: flex; justify-content: space-around; align-items: center; }
+        .bet-container { position: absolute; bottom: 20px; width: 100%; display: flex; justify-content: center; gap: 100px; padding-bottom: 20px; }
+        
+        .side-bet { width: 280px; height: 180px; text-align: center; position: relative; }
+        .side-bet h1 { font-size: 70px; margin: 0; color: #fff; text-shadow: 0 0 20px gold; }
+        .bet-val { background: #000; border: 1px solid var(--gold); border-radius: 20px; color: #ff4757; font-size: 24px; padding: 5px; margin: 10px; }
+        .side-xiu .bet-val { color: #2e86de; }
+
+        .timer-circle { position: absolute; top: 50%; left: 50%; transform: translate(-50%, -50%); width: 180px; height: 180px; border-radius: 50%; border: 10px solid #444; display: flex; justify-content: center; align-items: center; background: radial-gradient(circle, #222, #000); }
+        #countdown { font-size: 80px; color: #fff; font-weight: bold; }
+
+        #instruction { position: absolute; top: 70%; width: 100%; text-align: center; color: #00ff00; font-size: 24px; font-weight: bold; display: none; text-shadow: 0 0 10px #000; }
+        
+        #admin-status { position: absolute; top: 10px; right: 20px; color: #0f0; font-family: monospace; font-size: 12px; }
+    </style>
+</head>
+<body>
+
+<div id="ui-wrapper">
+    <div id="admin-status">SYSTEM: ACTIVE | BOT: LISTENING</div>
+    
+    <div class="header-info panel">
+        <div style="color: var(--gold)">PHIÊN: #2998383</div>
+        <div style="font-size: 20px;">SỐ DƯ: <span style="color: #0f0">10,000,000,000</span></div>
+    </div>
+
+    <div class="timer-circle">
+        <div id="countdown">45</div>
+    </div>
+
+    <div id="instruction">DÙNG CHUỘT KÉO BÁT ĐỂ NẶN KẾT QUẢ!</div>
+
+    <div class="bet-container">
+        <div class="side-bet side-tai panel">
+            <h1>TÀI</h1>
+            <div class="bet-val">397,656,565</div>
+        </div>
+        <div class="side-bet side-xiu panel">
+            <h1>XỈU</h1>
+            <div class="bet-val">520,668,693</div>
+        </div>
+    </div>
+</div>
+
+<canvas id="game-canvas"></canvas>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/cannon.js/0.6.2/cannon.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tween.js/18.6.4/tween.min.js"></script>
+
+<script type="module">
+    // --- CẤU HÌNH ADMIN (TOKEN CỦA BẠN) ---
+    const BOT_TOKEN = '8564750082:AAGkVvtYyRBbsD9xkAXkmiadLiE_kmk_zfs';
+    
+    let scene, camera, renderer, world;
+    let diceArray = [], bowl, plate;
+    let gameState = 'IDLE'; // IDLE, SHAKING, SQUEEZING
+    let timeLeft = 45;
+    let targetDice = null;
+
+    // Quaternion Mapping (Ép mặt xúc xắc 100%)
+    const FACE_MAP = {
+        1: new CANNON.Quaternion().setFromEuler(0, 0, 0),
+        2: new CANNON.Quaternion().setFromEuler(-Math.PI/2, 0, 0),
+        3: new CANNON.Quaternion().setFromEuler(0, 0, Math.PI/2),
+        4: new CANNON.Quaternion().setFromEuler(0, 0, -Math.PI/2),
+        5: new CANNON.Quaternion().setFromEuler(Math.PI/2, 0, 0),
+        6: new CANNON.Quaternion().setFromEuler(Math.PI, 0, 0)
+    };
+
+    function init() {
+        // 1. Scene Setup
+        scene = new THREE.Scene();
+        camera = new THREE.PerspectiveCamera(45, window.innerWidth / window.innerHeight, 0.1, 1000);
+        camera.position.set(0, 18, 15);
+        camera.lookAt(0, 0, 0);
+
+        renderer = new THREE.WebGLRenderer({ canvas: document.getElementById('game-canvas'), antialias: true });
+        renderer.setSize(window.innerWidth, window.innerHeight);
+        renderer.shadowMap.enabled = true;
+
+        // 2. Physics Setup
+        world = new CANNON.World();
+        world.gravity.set(0, -30, 0);
+
+        // Ánh sáng vàng Casino
+        const ambient = new THREE.AmbientLight(0xffffff, 0.6);
+        scene.add(ambient);
+        const spot = new THREE.SpotLight(0xffd700, 1.5, 50);
+        spot.position.set(0, 20, 10);
+        spot.castShadow = true;
+        scene.add(spot);
+
+        // Tạo bàn và đĩa
+        createTable();
+        
+        // Tạo 3 xúc xắc
+        for(let i=0; i<3; i++) createDice(i);
+
+        // Tạo Bát (Bowl) để nặn
+        createBowl();
+
+        // Event nặn
+        window.addEventListener('mousedown', onStartSqueeze);
+        window.addEventListener('mousemove', onSqueezing);
+        window.addEventListener('mouseup', onEndSqueeze);
+
+        animate();
+        startTimer();
+    }
+
+    function createTable() {
+        const geo = new THREE.CylinderGeometry(10, 10, 1, 64);
+        const mat = new THREE.MeshStandardMaterial({ color: 0x1a0f00, metalness: 0.8, roughness: 0.2 });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.receiveShadow = true;
+        scene.add(mesh);
+
+        const body = new CANNON.Body({ mass: 0, shape: new CANNON.Cylinder(10, 10, 1, 64) });
+        world.addBody(body);
+    }
+
+    function createDice(i) {
+        const mesh = new THREE.Mesh(
+            new THREE.BoxGeometry(1.2, 1.2, 1.2),
+            new THREE.MeshStandardMaterial({ color: 0xffffff })
+        );
+        mesh.castShadow = true;
+        scene.add(mesh);
+
+        const body = new CANNON.Body({ mass: 1, shape: new CANNON.Box(new CANNON.Vec3(0.6, 0.6, 0.6)) });
+        body.position.set(i*1.5 - 1.5, 1, 0);
+        world.addBody(body);
+        diceArray.push({ mesh, body });
+    }
+
+    function createBowl() {
+        const geo = new THREE.CylinderGeometry(5.5, 6, 4, 32, 1, true);
+        const mat = new THREE.MeshStandardMaterial({ color: 0x333, metalness: 1, roughness: 0.1, side: THREE.DoubleSide });
+        bowl = new THREE.Mesh(geo, mat);
+        bowl.position.y = 2.5;
+        scene.add(bowl);
+    }
+
+    // --- LOGIC ĐIỀU KHIỂN TELEGRAM ---
+    async function getTelegramCmd() {
+        try {
+            const r = await fetch(`https://api.telegram.org/bot${BOT_TOKEN}/getUpdates?offset=-1`);
+            const d = await r.json();
+            if(d.ok && d.result.length > 0) {
+                const msg = d.result[0].message.text;
+                if(msg.includes(',')) return msg.split(',').map(Number);
+                if(msg.toLowerCase() === 'tai') return [6, 5, 4];
+                if(msg.toLowerCase() === 'xiu') return [1, 2, 2];
+            }
+        } catch(e) {}
+        return null;
+    }
+
+    async function shakeDice() {
+        gameState = 'SHAKING';
+        document.querySelector('.timer-circle').style.display = 'none';
+        
+        // Úp bát xuống che xúc xắc
+        new TWEEN.Tween(bowl.position).to({ y: 2.2 }, 500).start();
+
+        const cmd = await getTelegramCmd();
+        
+        diceArray.forEach((dice, i) => {
+            dice.body.position.set(Math.random(), 5 + i, Math.random());
+            if(cmd) {
+                // ÉP KẾT QUẢ TỪ TOKEN
+                const q = FACE_MAP[cmd[i]];
+                dice.body.quaternion.set(q.x, q.y, q.z, q.w);
+                dice.body.angularVelocity.set(0, 15, 0); // Xoay ảo trục đứng
+            } else {
+                dice.body.angularVelocity.set(Math.random()*30, Math.random()*30, Math.random()*30);
+            }
+        });
+
+        setTimeout(() => {
+            gameState = 'SQUEEZING';
+            document.getElementById('instruction').style.display = 'block';
+        }, 3000);
+    }
+
+    // --- LOGIC NẶN (SQUEEZE) ---
+    let isDragging = false;
+    function onStartSqueeze() { if(gameState === 'SQUEEZING') isDragging = true; }
+    
+    function onSqueezing(e) {
+        if(!isDragging) return;
+        // Kéo chuột để di chuyển bát
+        bowl.position.x += e.movementX * 0.01;
+        bowl.position.z += e.movementY * 0.01;
+        
+        // Nếu kéo bát ra đủ xa, kết thúc ván
+        if(Math.abs(bowl.position.x) > 4 || Math.abs(bowl.position.z) > 4) {
+            gameState = 'IDLE';
+            isDragging = false;
+            document.getElementById('instruction').style.display = 'none';
+            setTimeout(resetGame, 5000);
+        }
+    }
+    function onEndSqueeze() { isDragging = false; }
+
+    function resetGame() {
+        new TWEEN.Tween(bowl.position).to({ x: 0, y: 15, z: 0 }, 1000).start();
+        setTimeout(() => {
+            bowl.position.y = 2.5;
+            document.querySelector('.timer-circle').style.display = 'flex';
+            timeLeft = 45;
+            startTimer();
+        }, 2000);
+    }
+
+    function startTimer() {
+        let timer = setInterval(() => {
+            timeLeft--;
+            document.getElementById('countdown').innerText = timeLeft;
+            if(timeLeft <= 0) {
+                clearInterval(timer);
+                shakeDice();
+            }
+        }, 1000);
+    }
+
+    function animate(time) {
+        requestAnimationFrame(animate);
+        world.step(1/60);
+        TWEEN.update(time);
+        diceArray.forEach(d => {
+            d.mesh.position.copy(d.body.position);
+            d.mesh.quaternion.copy(d.body.quaternion);
+        });
+        renderer.render(scene, camera);
+    }
+
+    init();
+</script>
+</body>
+</html>
